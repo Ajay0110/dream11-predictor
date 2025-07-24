@@ -2,42 +2,56 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# --- Config ---
-st.set_page_config("Dream11 Predictor", layout="wide")
-st.title("🏏 Live Dream11 Predictor")
+# Set Streamlit app configuration
+st.set_page_config(page_title="Dream11 Live Predictor", layout="wide")
+st.title("🏏 Dream11 Live Match Predictor")
+st.markdown("---")
 
-# Load stats
+# Load player stats from CSV
 @st.cache_data
+
 def load_stats():
     try:
         return pd.read_csv("player_stats.csv")
-    except:
-        st.error("player_stats.csv not found.")
+    except FileNotFoundError:
+        st.error("❌ 'player_stats.csv' not found in the repo root.")
+        return pd.DataFrame()
 
 stats_df = load_stats()
 
-# Live matches from AllSportsAPI
+# Fetch live matches from AllSportsAPI
 @st.cache_data(ttl=60)
 def fetch_live_matches():
     url = f"https://apiv2.allsportsapi.com/cricket/?met=Livescore&APIkey={st.secrets['SPORTSDEV_ALTERNATE_KEY']}"
-    res = requests.get(url).json()
-    return res.get("result", [])
+    res = requests.get(url)
+    if res.status_code != 200:
+        st.error("⚠️ Failed to fetch live matches from API.")
+        return []
+    data = res.json()
+    return data.get("result", [])
 
-live = fetch_live_matches()
+live_matches = fetch_live_matches()
 
-if not live:
-    st.warning("No live matches right now.")
+if not live_matches:
+    st.warning("📭 No live matches at the moment.")
 else:
-    for m in live:
-        st.subheader(f"{m['event_home_team']} vs {m['event_away_team']} – 🔴 Live")
-        # Assume squads are available via Sportsdev or separate endpoint
-        # Use placeholder team lists here:
-        team_players = m.get("squad", [])  # Replace with actual squad fetching
-        all_players = []
-        for p in team_players:
-            pts = stats_df.loc[stats_df['player']==p, 'points'].squeeze() if p in stats_df['player'].values else 0
-            all_players.append({"name": p, "points": pts})
-        top11 = sorted(all_players, key=lambda x: x['points'], reverse=True)[:11]
-        st.table(pd.DataFrame(top11))
+    for match in live_matches:
+        team1 = match.get("event_home_team")
+        team2 = match.get("event_away_team")
+        st.subheader(f"{team1} vs {team2} — 🔴 Live")
 
-st.caption("Using AllSportsAPI Livescore for live matches")
+        # For now, simulate squad extraction using player_stats.csv
+        team_players = stats_df[stats_df['team'].isin([team1, team2])]
+
+        if team_players.empty:
+            st.info("⏳ Waiting for confirmed squad announcement...")
+            continue
+
+        # Rank players based on their 'points' column
+        top_players = team_players.sort_values(by="points", ascending=False).head(11)
+
+        st.markdown("### 🏆 Predicted Fantasy XI")
+        st.table(top_players[['player', 'role', 'points']].reset_index(drop=True))
+        st.markdown("---")
+
+st.caption("Built with ❤️ using AllSportsAPI + Dream11 stats")
