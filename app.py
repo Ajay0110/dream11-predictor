@@ -32,7 +32,7 @@ def select_best_11_players(squad):
     ]
     sorted_players = sorted(
         squad,
-        key=lambda p: preferred_roles.index(p["role"]) if p["role"] in preferred_roles else 99
+        key=lambda p: preferred_roles.index(p.get("role", "")) if p.get("role", "") in preferred_roles else 99
     )
     return sorted_players[:11]
 
@@ -43,12 +43,20 @@ if not matches:
     st.warning("No matches available today or API limit reached.")
 else:
     for match in matches:
-        team1 = match.get("teamInfo", [])[0].get("name", "Team 1")
-        team2 = match.get("teamInfo", [])[1].get("name", "Team 2")
+        team_info = match.get("teamInfo", [])
+        if len(team_info) < 2:
+            continue
+
+        team1 = team_info[0].get("name", "Team 1")
+        team2 = team_info[1].get("name", "Team 2")
         st.subheader(f"📌 {team1} vs {team2}")
 
-        team1_players = match.get("teamInfo", [])[0].get("players", [])
-        team2_players = match.get("teamInfo", [])[1].get("players", [])
+        team1_players = team_info[0].get("players", [])
+        team2_players = team_info[1].get("players", [])
+
+        if not team1_players and not team2_players:
+            st.info("🚨 Squads not announced yet.")
+            continue
 
         # Combine squads
         full_squad = team1_players + team2_players
@@ -59,7 +67,7 @@ else:
         with st.expander("🔮 Predicted Best 11 Players"):
             for i, player in enumerate(best_11, start=1):
                 st.markdown(
-                    f"{i}. **{player['name']}** – {player['role']} ({player.get('battingStyle', 'NA')})"
+                    f"{i}. **{player.get('name', 'Unknown')}** – {player.get('role', 'Role NA')} ({player.get('battingStyle', 'Style NA')})"
                 )
 
 st.markdown("---")
