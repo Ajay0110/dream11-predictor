@@ -1,74 +1,93 @@
 import streamlit as st
 import requests
-import pandas as pd
+from datetime import datetime
 
-# Title
 st.set_page_config(page_title="Dream11 Predictor", layout="wide")
-st.title("🏏 Dream11 Best 11 Predictor")
+
+st.title("🏏 Dream11 Team Predictor")
+st.markdown("Get the best predicted XI based on real-time match data.")
 st.markdown("---")
 
-# Secrets
 API_KEY = st.secrets["CRICAPI_KEY"]
-
-# API URL
 API_URL = f"https://api.cricapi.com/v1/currentMatches?apikey={API_KEY}&offset=0"
 
-# Fetch matches from CricAPI
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def get_today_matches():
     try:
-        response = requests.get(API_URL)
-        data = response.json()
-        return data.get("data", [])
+        res = requests.get(API_URL)
+        data = res.json()
+        today = datetime.today().date()
+        matches = []
+
+        for match in data.get("data", []):
+            date_str = match.get("date", "")[:10]
+            try:
+                match_day = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except:
+                continue
+
+            status = match.get("status", "").lower()
+            if match_day != today:
+                continue
+            if "completed" in status or "result" in status:
+                continue
+
+            matches.append(match)
+        return matches
     except Exception as e:
-        st.error(f"Error fetching matches: {e}")
+        st.error("Failed to fetch match data.")
         return []
 
-# Best 11 selection logic
-def select_best_11_players(squad):
-    preferred_roles = [
-        "Batting Allrounder", "Bowling Allrounder", "Allrounder",
-        "Bowler", "Batsman", "WK-Batsman", "Wicketkeeper"
-    ]
-    sorted_players = sorted(
-        squad,
-        key=lambda p: preferred_roles.index(p.get("role", "")) if p.get("role", "") in preferred_roles else 99
-    )
+def extract_players(match):
+    teams = match.get("teams", [])
+    team_data = match.get("teamInfo", [])
+    team_players = {}
+
+    if not team_data:
+        return {}
+
+    for team in team_data:
+        name = team.get("name")
+        players = team.get("players", [])
+        if players:
+            team_players[name] = players
+    return team_players
+
+def predict_best_11(team_players):
+    all_players = []
+    for team, players in team_players.items():
+        for player in players:
+            all_players.append({"team": team, **player})
+
+    # Simple logic: Allrounders > Bowlers > Batsmen > Keepers
+    role_priority = {
+        "Allrounder": 1,
+        "Batting Allrounder": 1,
+        "Bowling Allrounder": 1,
+        "Bowler": 2,
+        "Batsman": 3,
+        "WK-Batsman": 4,
+        "Wicketkeeper": 4
+    }
+
+    sorted_players = sorted(all_players, key=lambda x: role_priority.get(x.get("role", ""), 5))
     return sorted_players[:11]
 
-# Load Matches
-matches = get_today_matches()
+today_matches = get_today_matches()
 
-if not matches:
-    st.warning("No matches available today or API limit reached.")
+if not today_matches:
+    st.warning("No matches with announced squads today.")
 else:
-    for match in matches:
-        team_info = match.get("teamInfo", [])
-        if len(team_info) < 2:
-            continue
+    for match in today_matches:
+        st.subheader(f"{match.get('name', 'Unknown Match')}")
+        team_players = extract_players(match)
 
-        team1 = team_info[0].get("name", "Team 1")
-        team2 = team_info[1].get("name", "Team 2")
-        st.subheader(f"📌 {team1} vs {team2}")
-
-        team1_players = team_info[0].get("players", [])
-        team2_players = team_info[1].get("players", [])
-
-        if not team1_players and not team2_players:
+        if not team_players:
             st.info("🚨 Squads not announced yet.")
             continue
 
-        # Combine squads
-        full_squad = team1_players + team2_players
+        best_11 = predict_best_11(team_players)
+        for player in best_11:
+            st.markdown(f"**{player['name']}** ({player['team']}) - {player.get('role', 'Unknown')}")
 
-        # Predict Best 11
-        best_11 = select_best_11_players(full_squad)
-
-        with st.expander("🔮 Predicted Best 11 Players"):
-            for i, player in enumerate(best_11, start=1):
-                st.markdown(
-                    f"{i}. **{player.get('name', 'Unknown')}** – {player.get('role', 'Role NA')} ({player.get('battingStyle', 'Style NA')})"
-                )
-
-st.markdown("---")
-st.caption("Built with ❤️ by Ajay")
+        st.markdown("---")
