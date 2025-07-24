@@ -11,7 +11,11 @@ st.title("🏏 Dream11 Fantasy XI Predictor")
 @st.cache_data
 
 def load_stats():
-    return pd.read_csv("dream11_stats.csv")
+    try:
+        return pd.read_csv("player_stats.csv")
+    except FileNotFoundError:
+        st.error("The stats CSV file (player_stats.csv) was not found. Please upload it to the root of the repo.")
+        return pd.DataFrame()
 
 stats_df = load_stats()
 
