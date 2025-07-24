@@ -3,67 +3,71 @@ import pandas as pd
 import requests
 from datetime import datetime
 
-# CONFIG
-API_KEY = st.secrets["CRICAPI_KEY"]
-CSV_FILE = "player_stats.csv"  # Make sure this is the correct name in your repo
+# Title
+st.set_page_config(page_title="Dream11 Predictor", layout="wide")
+st.title("🏏 Dream11 Fantasy XI Predictor")
 
-# Load CSV
+# Load player stats CSV
 @st.cache_data
+
 def load_stats():
-    try:
-        df = pd.read_csv(CSV_FILE)
-        return df
-    except Exception as e:
-        st.error(f"Failed to load CSV: {e}")
-        return pd.DataFrame()
-
-# Fetch today's matches
-def get_today_matches():
-    url = f"https://api.cricapi.com/v1/currentMatches?apikey={API_KEY}&offset=0"
-    response = requests.get(url)
-    if response.status_code != 200:
-        st.error("Failed to fetch match data from API")
-        return []
-    matches = response.json().get("data", [])
-    today = datetime.now().date()
-    today_matches = [
-        match for match in matches
-        if match.get("date", "").startswith(str(today)) and match.get("status") not in ["Completed", "Match Ended"]
-    ]
-    return today_matches
-
-# Predict best 11 players (demo logic)
-def predict_best_11(players, stats_df):
-    # Simple scoring logic demo: random or based on dummy logic
-    filtered = stats_df[stats_df["name"].isin(players)]
-    if "fantasy_score" in filtered.columns:
-        top11 = filtered.sort_values(by="fantasy_score", ascending=False).head(11)
-    else:
-        top11 = filtered.head(11)  # fallback
-    return top11
-
-# --- UI ---
-st.title("🏏 Dream11 Predictor - Fantasy 11 Demo")
+    return pd.read_csv("dream11_stats.csv")
 
 stats_df = load_stats()
-matches = get_today_matches()
 
-if not matches:
-    st.warning("No live/upcoming matches found today or squads not yet announced.")
+# Load API Key from secrets
+API_KEY = st.secrets["CRICAPI_KEY"]
+API_URL = f"https://api.cricapi.com/v1/currentMatches?apikey={API_KEY}&offset=0"
+
+# Get today's matches and filter live/upcoming
+response = requests.get(API_URL)
+matches = response.json().get("data", [])
+today = datetime.now().date()
+
+live_matches = []
+for match in matches:
+    date_str = match.get("date", "")[:10]
+    try:
+        match_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        continue
+    status = match.get("status", "").lower()
+    started = match.get("matchStarted", False)
+
+    if match_date == today and (started and "won by" not in status or not started):
+        live_matches.append(match)
+
+if not live_matches:
+    st.warning("No upcoming or live matches today with available squad info.")
 else:
-    match = st.selectbox("Select Match", matches, format_func=lambda x: f"{x['teamInfo'][0]['name']} vs {x['teamInfo'][1]['name']}")
-    
-    squads = []
-    for team in match["teamInfo"]:
-        for player in team.get("players", []):
-            squads.append(player.get("name"))
+    for match in live_matches:
+        team1 = match.get("teamInfo", [{}])[0].get("name", "Team A")
+        team2 = match.get("teamInfo", [{}])[1].get("name", "Team B")
+        squads = match.get("squads", [])  # Some matches might not have this
 
-    if squads:
-        st.subheader("🧠 Predicted Best 11")
-        predicted = predict_best_11(squads, stats_df)
-        st.dataframe(predicted)
-    else:
-        st.info("👀 Squads not yet announced. Check back closer to match time!")
+        st.markdown(f"### 🏟️ {team1} vs {team2}")
+        if not squads:
+            st.info("Squads not announced yet.")
+            continue
 
-st.markdown("---")
-st.caption("Demo powered by CSV + CricAPI")
+        teams = {team['teamName']: team['players'] for team in squads}
+
+        # Fantasy XI logic (top 11 players based on stats)
+        all_players = []
+        for team, players in teams.items():
+            for player in players:
+                name = player.get("name", "")
+                player_stats = stats_df[stats_df['player'] == name]
+                if not player_stats.empty:
+                    total_points = player_stats.iloc[0]["points"]
+                else:
+                    total_points = 0
+                all_players.append({"name": name, "team": team, "points": total_points})
+
+        # Sort and select top 11
+        top_11 = sorted(all_players, key=lambda x: x["points"], reverse=True)[:11]
+
+        df = pd.DataFrame(top_11)
+        st.dataframe(df, use_container_width=True)
+
+        st.markdown("---")
